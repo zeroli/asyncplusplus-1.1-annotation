@@ -35,6 +35,24 @@ class threadpool_scheduler;
 
 namespace detail {
 
+// 只要提供了`schedule(task_run_handle t)`，应该都可以被认为是scheduler，可以运行task
+// 这里采用了c++提供的decltype和std::declval组合来检测类是否提供了一个特别的函数
+// 也可以采用比较经典的方式: 判断一个类是否提供了一个特别的成员函数
+/*
+template <typename T>
+sruct is_scheduler {
+	template <typename V, V>
+	struct dummy { };
+
+	template <typename U>
+	static char test(dummy<void (U::*), &U::schedule>*);  // 参数是一个dummy<..>对象指针
+
+	template <typename U>
+	static int test(...);
+
+	static const bool value = sizeof(test<T>(0)) == sizeof(char);
+};
+*/
 // Detect whether an object is a scheduler
 template<typename T, typename = decltype(std::declval<T>().schedule(std::declval<task_run_handle>()))>
 two& is_scheduler_helper(int);
@@ -42,6 +60,12 @@ template<typename T>
 one& is_scheduler_helper(...);
 template<typename T>
 struct is_scheduler: public std::integral_constant<bool, sizeof(is_scheduler_helper<T>(0)) - 1> {};
+
+// 这个文件定义了4中task schedulers
+// 1) inline scheduler => 在当前线程直接运行task
+// 2) thread scheduler => 启动一个新线程std::thread，然后在那个线程中运行task
+// 3) threadpool with fifo queue => 线程池和fifo queue组合，task被执行是按照FIFO的顺序
+// 4) threadpool => 线程池，task可能会以任意次序被线程执行
 
 // Singleton scheduler classes
 class thread_scheduler_impl {
@@ -96,6 +120,7 @@ LIBASYNC_EXPORT threadpool_scheduler& default_threadpool_scheduler();
 // LIBASYNC_CUSTOM_DEFAULT_SCHEDULER before including async++.h. Keep in mind
 // that in that case async::default_scheduler should be declared before
 // including async++.h.
+// 全局默认task scheduler就是全局线程池scheduler
 #ifndef LIBASYNC_CUSTOM_DEFAULT_SCHEDULER
 inline threadpool_scheduler& default_scheduler()
 {

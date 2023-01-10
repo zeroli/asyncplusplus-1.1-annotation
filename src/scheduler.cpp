@@ -74,18 +74,18 @@ static void generic_wait_handler(task_wait_handle wait_task)
 // Wait handler function, per-thread, defaults to generic version
 struct pthread_emulation_thread_wait_handler_key_initializer {
 	pthread_key_t key;
-		
+
 	pthread_emulation_thread_wait_handler_key_initializer()
 	{
 		pthread_key_create(&key, nullptr);
 	}
-		
+
 	~pthread_emulation_thread_wait_handler_key_initializer()
 	{
 		pthread_key_delete(key);
 	}
 };
-	
+
 static pthread_key_t get_thread_wait_handler_key()
 {
 	static pthread_emulation_thread_wait_handler_key_initializer initializer;
@@ -107,7 +107,7 @@ static void set_thread_wait_handler(wait_handler handler)
 	thread_wait_handler = handler;
 #endif
 }
-	
+
 static wait_handler get_thread_wait_handler()
 {
 #if defined(EMULATE_PTHREAD_THREAD_LOCAL)
@@ -188,6 +188,7 @@ void thread_scheduler_impl::schedule(task_run_handle t)
 
 threadpool_scheduler& default_threadpool_scheduler()
 {
+	// 全局线程池scheduler对象，采用singleton，local static对象
 	return detail::singleton<detail::default_scheduler_impl>::get_instance();
 }
 

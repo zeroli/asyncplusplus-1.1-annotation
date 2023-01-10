@@ -67,7 +67,7 @@ struct ref_count_base {
 // Pointer to reference counted object, based on boost::intrusive_ptr
 template<typename T>
 class ref_count_ptr {
-	T* p;
+	T* p;  // T类型必须继承于`ref_count_base`基类
 
 public:
 	// Note that this doesn't increment the reference count, instead it takes
@@ -90,6 +90,7 @@ public:
 	{
 		other.p = nullptr;
 	}
+	// 释放一个ref count
 	ref_count_ptr& operator=(std::nullptr_t)
 	{
 		if (p)
@@ -99,6 +100,22 @@ public:
 	}
 	ref_count_ptr& operator=(const ref_count_ptr& other) LIBASYNC_NOEXCEPT
 	{
+		// 这里最好是先将other.p->add_ref，然后再p->remove_ref
+		// 可以避免a = a，自赋值时出现p先被删除的情况
+		/*
+			if (other.p) {
+				other.p->add_ref();
+			}
+			if (p) {
+				p->remove_ref();
+				p = nullptr;
+			}
+			p = other.p;
+			return *this;
+		*/
+		// 还有一种copy-swap的方式:
+		// ref_count_ptr(other).swap(*this);
+		// return *this;
 		if (p) {
 			p->remove_ref();
 			p = nullptr;
@@ -110,6 +127,12 @@ public:
 	}
 	ref_count_ptr& operator=(ref_count_ptr&& other) LIBASYNC_NOEXCEPT
 	{
+		/*
+		采用下面的copy-swap idiom会更好
+		最后临时对象销毁时，会自动调用析构函数，从而remove_ref被调用
+		ref_count_ptr(std::move(other)).swap(*this);
+		return *this;
+		*/
 		if (p) {
 			p->remove_ref();
 			p = nullptr;

@@ -94,6 +94,7 @@ LIBASYNC_EXPORT wait_handler set_thread_wait_handler(wait_handler w) LIBASYNC_NO
 struct LIBASYNC_EXPORT_EXCEPTION task_not_executed {};
 
 // Task handle used in scheduler, acts as a unique_ptr to a task object
+// handle-body机制的对象
 class task_run_handle {
 	detail::task_ptr handle;
 
@@ -117,6 +118,8 @@ public:
 	// If the task is not executed, cancel it with an exception
 	~task_run_handle()
 	{
+		// `std::make_exception_ptr`是c++11引入的，类似于shared_ptr<T>
+		// 它会在内部做一个对传入的exception的拷贝，或者直接指向堆上产生的exception对象
 		if (handle)
 			handle->vtable->cancel(handle.get(), std::make_exception_ptr(task_not_executed()));
 	}
@@ -130,8 +133,10 @@ public:
 	// Run the task and release the handle
 	void run()
 	{
+		// 不采用c++内置的vtable，稍后再去了解
+		// 类似于task func类有自己实现的`run`虚函数
 		handle->vtable->run(handle.get());
-		handle = nullptr;
+		handle = nullptr; // 类似于reset，释放一个ref count
 	}
 
 	// Run the task but run the given wait handler when waiting for a task,
@@ -151,6 +156,8 @@ public:
 	}
 	static task_run_handle from_void_ptr(void* ptr)
 	{
+		// 堆上的task指针，包装成一个ref_counted ptr(refcnt=1)
+		// 然后再包装成一个handle
 		return task_run_handle(detail::task_ptr(static_cast<detail::task_base*>(ptr)));
 	}
 };

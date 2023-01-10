@@ -30,7 +30,8 @@ namespace detail {
 class fifo_queue {
 	detail::aligned_array<void*, LIBASYNC_CACHELINE_SIZE> items;
 	std::size_t head, tail;
-
+	// head == (tail + 1) % size ====> full
+	// head == tail % size        ====> empty
 public:
 	fifo_queue()
 		: items(32), head(0), tail(0) {}
@@ -45,6 +46,8 @@ public:
 	void push(task_run_handle t)
 	{
 		// Resize queue if it is full
+		// 这里&运算类似于模运算
+		// 假定item.size()是power of 2，item.size() - 1就是mask
 		if (head == ((tail + 1) & (items.size() - 1))) {
 			detail::aligned_array<void*, LIBASYNC_CACHELINE_SIZE> new_items(items.size() * 2);
 			for (std::size_t i = 0; i != items.size(); i++)

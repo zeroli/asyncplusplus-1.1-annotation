@@ -474,7 +474,9 @@ public:
 
 // Spawn a function asynchronously
 template<typename Sched, typename Func>
-task<typename detail::remove_task<typename std::result_of<typename std::decay<Func>::type()>::type>::type> spawn(Sched& sched, Func&& f)
+// 注意：这一长串就是返回值类型: task<T>
+task<typename detail::remove_task<typename std::result_of<typename std::decay<Func>::type()>::type>::type>
+spawn(Sched& sched, Func&& f)
 {
 	// Using result_of in the function return type to work around bugs in the Intel
 	// C++ compiler.
@@ -486,17 +488,28 @@ task<typename detail::remove_task<typename std::result_of<typename std::decay<Fu
 	// Create task
 	typedef typename detail::void_to_fake_void<typename detail::remove_task<decltype(std::declval<decay_func>()())>::type>::type internal_result;
 	typedef detail::root_exec_func<Sched, internal_result, decay_func, detail::is_task<decltype(std::declval<decay_func>()())>::value> exec_func;
+	// 这里构造一个task对象，一个handle
+	// `task_func`才是内部真正包装func的对象
 	task<typename detail::remove_task<decltype(std::declval<decay_func>()())>::type> out;
 	detail::set_internal_task(out, detail::task_ptr(new detail::task_func<Sched, exec_func, internal_result>(std::forward<Func>(f))));
 
+	// 这个`task_func`对象应该是继承于ref_count
+	// 下面get_internal_task返回的就是task_func*指针
+	// 这里手动增加引用计数，是因为接下来直接将这个指针让另外一个ref_count_ptr(task_ptr)进行管理了。
+	// 所以这里引用计数应该为2了.
+	// 一个放在了返回给用户的task对象中，另一个被scheduler进行调用管理(存在某一个内部的task队列中)
 	// Avoid an expensive ref-count modification since the task isn't shared yet
 	detail::get_internal_task(out)->add_ref_unlocked();
 	detail::schedule_task(sched, detail::task_ptr(detail::get_internal_task(out)));
 
 	return out;
 }
+
+// 这个才是对外的接口函数： spawn，传入一个callable对象，返回一个task<T>类型对象
+// 采用全局默认的scheduler
 template<typename Func>
-decltype(async::spawn(::async::default_scheduler(), std::declval<Func>())) spawn(Func&& f)
+decltype(async::spawn(::async::default_scheduler(), std::declval<Func>()))
+spawn(Func&& f)
 {
 	return async::spawn(::async::default_scheduler(), std::forward<Func>(f));
 }

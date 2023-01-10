@@ -47,6 +47,8 @@ public:
 			for (i = 0; i < length; i++)
 				new(ptr + i) T;
 		} LIBASYNC_CATCH(...) {
+			// 一旦一个构造函数抛出异常，`i`停止迭代
+			// 就需要将0到i之间的所有的对象析构
 			for (std::size_t j = 0; j < i; j++)
 				ptr[i].~T();
 			aligned_free(ptr);
@@ -61,6 +63,10 @@ public:
 	}
 	aligned_array& operator=(aligned_array&& other) LIBASYNC_NOEXCEPT
 	{
+		// 调用移动构造函数，将自己的内容全部reset
+		// 注意这里产生了一个临时对象，然后立马销毁了
+		// aligned_array().swap(*this);
+		// 因此这里会将当前对象的内存对象一一销毁，然后释放内存
 		aligned_array(std::move(*this));
 		std::swap(ptr, other.ptr);
 		std::swap(length, other.length);
@@ -77,6 +83,9 @@ public:
 		aligned_free(ptr);
 	}
 
+	// 这个函数声明应该是编译不通过。如果客户端调用这个函数的话。
+	// 但是如果客户端没有代码调用它，编译器就不会进行实例化，从而不会编译报告这个错误
+	// 应该去除`const`
 	T& operator[](std::size_t i) const
 	{
 		return ptr[i];
