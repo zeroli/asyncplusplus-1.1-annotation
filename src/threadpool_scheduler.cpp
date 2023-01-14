@@ -34,10 +34,13 @@ namespace async {
 namespace detail {
 
 // Per-thread data, aligned to cachelines to avoid false sharing
+// 因为这个类需要被放入到一个线程池的线程数据列表中
+// 不同线程同步访问/修改自己对应槽的结构体对象
+// 为了避免cache false-sharing，最好align到cache line
 struct LIBASYNC_CACHELINE_ALIGN thread_data_t {
-	work_steal_queue queue;
+	work_steal_queue queue;  // 每个线程有自己local的任务队列
 	std::minstd_rand rng;
-	std::thread handle;
+	std::thread handle;  // 以及对应的线程体句柄
 };
 
 // Internal data used by threadpool_scheduler
@@ -55,6 +58,8 @@ struct threadpool_data {
 	// Array of per-thread data
 	aligned_array<thread_data_t> thread_data;
 
+	// 全局task队列，先进先出的队列，所有线程共享
+	// 访问需要lock保护
 	// Global queue for tasks from outside the pool
 	fifo_queue public_queue;
 
@@ -64,6 +69,7 @@ struct threadpool_data {
 	// List of threads waiting for tasks to run. num_waiters needs to be atomic
 	// because it is sometimes read outside the mutex.
 	std::atomic<std::size_t> num_waiters;
+	// 一个task_wait_event*数组，数组元素是task_wait_event*指针
 	std::unique_ptr<task_wait_event*[]> waiters;
 
 	// Pre/Post run functions.
@@ -91,7 +97,7 @@ struct threadpool_data_wrapper {
 #if defined(EMULATE_PTHREAD_THREAD_LOCAL)
 struct pthread_emulation_threadpool_data_initializer {
 	pthread_key_t key;
-	
+
 	pthread_emulation_threadpool_data_initializer()
 	{
 		pthread_key_create(&key, [](void* wrapper_ptr) {
@@ -99,13 +105,13 @@ struct pthread_emulation_threadpool_data_initializer {
 			delete wrapper;
 		});
 	}
-		
+
 	~pthread_emulation_threadpool_data_initializer()
 	{
 		pthread_key_delete(key);
 	}
 };
-	
+
 static pthread_key_t get_local_threadpool_data_key()
 {
 	static pthread_emulation_threadpool_data_initializer initializer;
@@ -119,7 +125,7 @@ static THREAD_LOCAL threadpool_data* owning_threadpool = nullptr;
 // Current thread's index in the pool
 static THREAD_LOCAL std::size_t thread_id;
 #endif
-	
+
 static void create_threadpool_data(threadpool_data* owning_threadpool_, std::size_t thread_id_)
 {
 #if defined(EMULATE_PTHREAD_THREAD_LOCAL)
@@ -130,7 +136,7 @@ static void create_threadpool_data(threadpool_data* owning_threadpool_, std::siz
 	thread_id = thread_id_;
 #endif
 }
-	
+
 static threadpool_data_wrapper get_threadpool_data_wrapper()
 {
 #if defined(EMULATE_PTHREAD_THREAD_LOCAL)
@@ -169,6 +175,7 @@ static task_run_handle steal_task(threadpool_data* impl, std::size_t thread_id)
 	return task_run_handle();
 }
 
+// <<<<<<每个线程干活的函数体>>>>>>
 // Main task stealing loop which is used by worker threads when they have
 // nothing to do.
 static void thread_task_loop(threadpool_data* impl, std::size_t thread_id, task_wait_handle wait_task)
@@ -190,20 +197,28 @@ static void thread_task_loop(threadpool_data* impl, std::size_t thread_id, task_
 		if (wait_task && (added_continuation ? event.try_wait(wait_type::task_finished) : wait_task.ready()))
 			return;
 
+		// 先从当前线程local中获取一个task运行，最快的方式
 		// Try to get a task from the local queue
 		if (task_run_handle t = current_thread.queue.pop()) {
 			t.run();
 			continue;
 		}
 
+		// 从其它线程中偷一个task，或者从全局队列中偷一个
+		// 运行完task，会退出到上层循环，这样local队列才能被再次访问到
 		// Stealing loop
 		while (true) {
+			// 再从其它线程中偷一个过来运行
+			// 只会与一个线程进行竞争，或者比较少的线程竞争，较快的方式
+			// 如果先从全局队列中获取task，竞争的线程可能会比较多，contention会比较大
 			// Try to steal a task
 			if (task_run_handle t = steal_task(impl, thread_id)) {
 				t.run();
 				break;
 			}
 
+			// 最后从全局任务队列中那一个task运行
+			// 这些队列都是non-blocking的，没有task，则返回一个null handle
 			// Try to fetch from the public queue
 			std::unique_lock<std::mutex> locked(impl->lock);
 			if (task_run_handle t = impl->public_queue.pop()) {
@@ -223,6 +238,7 @@ static void thread_task_loop(threadpool_data* impl, std::size_t thread_id, task_
 				return;
 			}
 
+			// 这里延迟初始化event对象里面的mutex/condition_variable
 			// Initialize the event object
 			event.init();
 
@@ -237,9 +253,11 @@ static void thread_task_loop(threadpool_data* impl, std::size_t thread_id, task_
 				added_continuation = true;
 			}
 
+			// 注意：我们还锁着全局锁！！！！
+			// 所以这里可以直接用relaxed！！
 			// Add our thread to the list of waiting threads
 			size_t num_waiters_val = impl->num_waiters.load(std::memory_order_relaxed);
-			impl->waiters[num_waiters_val] = &event;
+			impl->waiters[num_waiters_val] = &event;  // 仅仅是一个local event指针
 			impl->num_waiters.store(num_waiters_val + 1, std::memory_order_relaxed);
 
 			// Wait for our event to be signaled when a task is scheduled or
@@ -248,10 +266,13 @@ static void thread_task_loop(threadpool_data* impl, std::size_t thread_id, task_
 			int events = event.wait();
 			locked.lock();
 
+			// 查看`schedule`函数最后一行，提交线程已经去除了最后一个等待着
 			// Remove our thread from the list of waiting threads
 			num_waiters_val = impl->num_waiters.load(std::memory_order_relaxed);
 			for (std::size_t i = 0; i < num_waiters_val; i++) {
 				if (impl->waiters[i] == &event) {
+					// 如果不是最后一个，跟最后一个进行交换，就是指针变量交换
+					// 这种方式来实现vector的erase操作，高效！！
 					if (i != num_waiters_val - 1)
 						std::swap(impl->waiters[i], impl->waiters[num_waiters_val - 1]);
 					impl->num_waiters.store(num_waiters_val - 1, std::memory_order_relaxed);
@@ -292,6 +313,7 @@ static void worker_thread(threadpool_data* owning_threadpool, std::size_t thread
     // Prerun hook
     if (owning_threadpool->prerun) owning_threadpool->prerun();
 
+	// 注意这里最后一个参数传入的是一个空的wait handle
 	// Main loop, runs until the shutdown signal is recieved
 	thread_task_loop(owning_threadpool, thread_id, task_wait_handle());
 
@@ -328,6 +350,9 @@ threadpool_scheduler::threadpool_scheduler(threadpool_scheduler&& other)
 threadpool_scheduler::threadpool_scheduler(std::size_t num_threads)
 	: impl(new detail::threadpool_data(num_threads))
 {
+	// 启动n个线程，递归的启动，速度更快
+	// 启动的子线程可以并行的启动其它子线程
+	// 不采用当前线程迭代的启动
 	// Start worker threads
 	impl->thread_data[0].handle = std::thread(detail::recursive_spawn_worker_thread, impl.get(), 0, num_threads);
 #ifdef BROKEN_JOIN_IN_DESTRUCTOR
@@ -402,7 +427,7 @@ threadpool_scheduler::~threadpool_scheduler()
 void threadpool_scheduler::schedule(task_run_handle t)
 {
 	detail::threadpool_data_wrapper wrapper = detail::get_threadpool_data_wrapper();
-	
+
 	// Check if we are in the thread pool
 	if (wrapper.owning_threadpool == impl.get()) {
 		// Push the task onto our task queue
@@ -427,13 +452,17 @@ void threadpool_scheduler::schedule(task_run_handle t)
 	} else {
 		std::lock_guard<std::mutex> locked(impl->lock);
 
+		// 外界线程，还是先把task放入到全局队列中
 		// Push task onto the public queue
 		impl->public_queue.push(std::move(t));
 
+		// 没有线程在等待，都在忙，直接返回
+		// 稍后子线程会从队列中获取task运行
 		// Wake up a sleeping thread
 		size_t num_waiters_val = impl->num_waiters.load(std::memory_order_relaxed);
 		if (num_waiters_val == 0)
 			return;
+		// 唤醒最新加入等待的线程
 		impl->waiters[num_waiters_val - 1]->signal(detail::wait_type::task_available);
 		impl->num_waiters.store(num_waiters_val - 1, std::memory_order_relaxed);
 	}

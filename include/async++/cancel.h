@@ -58,6 +58,8 @@ public:
 	}
 };
 
+// C++ Concurrency in Action, 2nd有讲到如何interrupt/stop线程
+// 类似的机制，中断点检测，如果中断请求了，抛出异常
 // Interruption point, throws task_canceled if the specified token is set.
 inline void interruption_point(const cancellation_token& token)
 {

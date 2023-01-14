@@ -35,9 +35,14 @@ enum wait_type {
 //
 // The event object is lazily initialized to avoid unnecessary API calls.
 class task_wait_event {
+	// 为啥要这样操作，为啥要把下面2个对象放入纯粹的内存空间
+	// 这是避免默认的构造构造函数会自动调用它们的构造函数
+	// 花销很大么？
+	// 每次要用这个task_wait_event类时，都是会构造一个空的，然后调用Init
+	// 没啥区别啊，没看到如何做到lazy initialization啊。
 	std::aligned_storage<sizeof(std::mutex), std::alignment_of<std::mutex>::value>::type m;
 	std::aligned_storage<sizeof(std::condition_variable), std::alignment_of<std::condition_variable>::value>::type c;
-	int event_mask;
+	int event_mask;  // 用来传递特别的事件信号类型bit mask
 	bool initialized;
 
 	std::mutex& mutex()
@@ -98,6 +103,8 @@ public:
 		std::unique_lock<std::mutex> lock(mutex());
 		event_mask |= event;
 
+		// ？？？？？这个怎么解释？
+		// 意思是说wait先被唤醒，然后这个对象立即被销毁了，然后访问cond()失败？？
 		// This must be done while holding the lock otherwise we may end up with
 		// a use-after-free due to a race with wait().
 		cond().notify_one();

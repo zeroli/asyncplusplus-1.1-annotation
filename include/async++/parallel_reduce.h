@@ -90,6 +90,7 @@ Result parallel_reduce(Sched& sched, Range&& range, Result init, const ReduceFun
 {
 	return async::parallel_map_reduce(sched, range, init, detail::default_map(), reduce);
 }
+// 入口函数，提供range，初始值，和一个reduce function
 template<typename Range, typename Result, typename ReduceFunc>
 Result parallel_reduce(Range&& range, Result init, const ReduceFunc& reduce)
 {

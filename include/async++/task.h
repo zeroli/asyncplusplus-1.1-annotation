@@ -393,7 +393,9 @@ class local_task {
 	typedef typename detail::void_to_fake_void<result_type>::type internal_result;
 
 	// Task execution function type
-	typedef detail::root_exec_func<Sched, internal_result, decay_func, detail::is_task<decltype(std::declval<decay_func>()())>::value> exec_func;
+	typedef detail::root_exec_func<Sched,
+		internal_result, decay_func,
+		detail::is_task<decltype(std::declval<decay_func>()())>::value> exec_func;
 
 	// Task object embedded directly. The ref-count is initialized to 1 so it
 	// will never be freed using delete, only when the local_task is destroyed.
@@ -411,6 +413,9 @@ class local_task {
 	{
 		// Avoid an expensive ref-count modification since the task isn't shared yet
 		internal_task.add_ref_unlocked();
+		// 注意这里仅仅是将成员数据指针包装成一个ref_cnt ptr
+		// 而且前面手动增加了refcnt了，因而task_ptr销毁时不会delete这个task对象
+		// 构造一个task，仍然把它丢到threadpool里面去运行
 		detail::schedule_task(sched, detail::task_ptr(&internal_task));
 	}
 
@@ -424,6 +429,7 @@ public:
 	{
 		wait();
 
+		// 构造函数中已经手动将refcnt加1了，所以这里需要不断检查其它人没再引用这个对象
 		// Now spin until the reference count drops to 1, since the scheduler
 		// may still have a reference to the task.
 		while (!internal_task.is_unique_ref(std::memory_order_acquire)) {
@@ -486,12 +492,16 @@ spawn(Sched& sched, Func&& f)
 	static_assert(detail::is_callable<decay_func()>::value, "Invalid function type passed to spawn()");
 
 	// Create task
-	typedef typename detail::void_to_fake_void<typename detail::remove_task<decltype(std::declval<decay_func>()())>::type>::type internal_result;
-	typedef detail::root_exec_func<Sched, internal_result, decay_func, detail::is_task<decltype(std::declval<decay_func>()())>::value> exec_func;
+	typedef typename detail::void_to_fake_void<
+		typename detail::remove_task<decltype(std::declval<decay_func>()())>::type>::type internal_result;
+	typedef detail::root_exec_func<Sched,
+		internal_result, decay_func,
+		detail::is_task<decltype(std::declval<decay_func>()())>::value> exec_func;
 	// 这里构造一个task对象，一个handle
 	// `task_func`才是内部真正包装func的对象
 	task<typename detail::remove_task<decltype(std::declval<decay_func>()())>::type> out;
-	detail::set_internal_task(out, detail::task_ptr(new detail::task_func<Sched, exec_func, internal_result>(std::forward<Func>(f))));
+	detail::set_internal_task(out,
+		detail::task_ptr(new detail::task_func<Sched, exec_func, internal_result>(std::forward<Func>(f))));
 
 	// 这个`task_func`对象应该是继承于ref_count
 	// 下面get_internal_task返回的就是task_func*指针

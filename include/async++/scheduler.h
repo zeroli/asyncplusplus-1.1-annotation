@@ -30,6 +30,7 @@ namespace async {
 LIBASYNC_EXPORT std::size_t hardware_concurrency() LIBASYNC_NOEXCEPT;
 
 // Task handle used by a wait handler
+// TODO？ 这个类扮演一个啥角色？
 class task_wait_handle {
 	detail::task_base* handle;
 
@@ -75,8 +76,13 @@ public:
 		// Make sure the function type is callable
 		static_assert(detail::is_callable<Func()>::value, "Invalid function type passed to on_finish()");
 
-		auto cont = new detail::task_func<typename std::remove_reference<decltype(inline_scheduler())>::type, wait_exec_func<typename std::decay<Func>::type>, detail::fake_void>(std::forward<Func>(func));
+		auto cont = new detail::task_func<
+				typename std::remove_reference<decltype(inline_scheduler())>::type,  // scheduler类型
+				wait_exec_func<typename std::decay<Func>::type>,  // func类型，提供operator(task_base*)函数
+				detail::fake_void
+		>(std::forward<Func>(func));
 		cont->sched = std::addressof(inline_scheduler());
+		// 在当前task完成的线程中继续执行
 		handle->add_continuation(inline_scheduler(), detail::task_ptr(cont));
 	}
 };

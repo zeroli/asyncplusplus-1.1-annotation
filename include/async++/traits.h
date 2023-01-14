@@ -25,6 +25,9 @@
 namespace async {
 namespace detail {
 
+// 下面fake-void很有意思
+// 如何表示空类型？空类
+// 一个空类对应void类型，利用类模板的特化和函数重载，来实现两者间之间相互转换
 // Pseudo-void type: it takes up no space but can be moved and copied
 struct fake_void {};
 template<typename T>
@@ -54,6 +57,8 @@ struct is_task<shared_task<T>>: public std::true_type {};
 template<typename T>
 struct is_task<const shared_task<T>>: public std::true_type {};
 
+// 去除一个task<T>模板类的task包裹器，返回它包裹的类型
+// 仍然利用类模板的偏特化来实现
 // Extract the result type of a task if T is a task, otherwise just return T
 template<typename T>
 struct remove_task {
@@ -76,6 +81,8 @@ struct remove_task<const shared_task<T>> {
 	typedef T type;
 };
 
+// 如何判断一个类型是可以被调用？？
+// 函数，提供operator()的函数对象，lambda表示
 // Check if a type is callable with the given arguments
 typedef char one[1];
 typedef char two[2];

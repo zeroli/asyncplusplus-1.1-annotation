@@ -28,6 +28,8 @@ LIBASYNC_EXPORT void* aligned_alloc(std::size_t size, std::size_t align);
 LIBASYNC_EXPORT void aligned_free(void* addr) LIBASYNC_NOEXCEPT;
 
 // Class representing an aligned array and its length
+// 如果类型自己有特别的alignment要求，譬如采用alignas了
+// 那么分配的内存也要align到那个数值
 template<typename T, std::size_t Align = std::alignment_of<T>::value>
 class aligned_array {
 	std::size_t length;

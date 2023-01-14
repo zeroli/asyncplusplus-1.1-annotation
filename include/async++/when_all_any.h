@@ -168,7 +168,8 @@ void when_any_variadic(when_any_state<Result>* state, First&& first, T&&... task
 
 // Combine a set of tasks into one task which is signaled when all specified tasks finish
 template<typename Iter>
-task<std::vector<typename std::decay<typename std::iterator_traits<Iter>::value_type>::type>> when_all(Iter begin, Iter end)
+task<std::vector<typename std::decay<typename std::iterator_traits<Iter>::value_type>::type>>
+when_all(Iter begin, Iter end)
 {
 	typedef typename std::decay<typename std::iterator_traits<Iter>::value_type>::type task_type;
 	typedef std::vector<task_type> result_type;
@@ -200,7 +201,8 @@ task<std::vector<typename std::decay<typename std::iterator_traits<Iter>::value_
 
 // Combine a set of tasks into one task which is signaled when one of the tasks finishes
 template<typename Iter>
-task<when_any_result<std::vector<typename std::decay<typename std::iterator_traits<Iter>::value_type>::type>>> when_any(Iter begin, Iter end)
+task<when_any_result<std::vector<typename std::decay<typename std::iterator_traits<Iter>::value_type>::type>>>
+when_any(Iter begin, Iter end)
 {
 	typedef typename std::decay<typename std::iterator_traits<Iter>::value_type>::type task_type;
 	typedef std::vector<task_type> result_type;
@@ -237,14 +239,16 @@ task<when_any_result<std::vector<typename std::decay<typename std::iterator_trai
 
 // when_all wrapper accepting ranges
 template<typename T>
-decltype(async::when_all(std::begin(std::declval<T>()), std::end(std::declval<T>()))) when_all(T&& tasks)
+decltype(async::when_all(std::begin(std::declval<T>()), std::end(std::declval<T>())))
+when_all(T&& tasks)
 {
 	return async::when_all(std::begin(std::forward<T>(tasks)), std::end(std::forward<T>(tasks)));
 }
 
 // when_any wrapper accepting ranges
 template<typename T>
-decltype(async::when_any(std::begin(std::declval<T>()), std::end(std::declval<T>()))) when_any(T&& tasks)
+decltype(async::when_any(std::begin(std::declval<T>()), std::end(std::declval<T>())))
+when_any(T&& tasks)
 {
 	return async::when_any(std::begin(std::forward<T>(tasks)), std::end(std::forward<T>(tasks)));
 }
@@ -255,7 +259,8 @@ inline task<std::tuple<>> when_all()
 	return async::make_task(std::tuple<>());
 }
 template<typename... T>
-task<std::tuple<typename std::decay<T>::type...>> when_all(T&&... tasks)
+task<std::tuple<typename std::decay<T>::type...>>
+when_all(T&&... tasks)
 {
 	typedef std::tuple<typename std::decay<T>::type...> result_type;
 
@@ -275,7 +280,8 @@ inline task<when_any_result<std::tuple<>>> when_any()
 	return async::make_task(when_any_result<std::tuple<>>());
 }
 template<typename... T>
-task<when_any_result<std::tuple<typename std::decay<T>::type...>>> when_any(T&&... tasks)
+task<when_any_result<std::tuple<typename std::decay<T>::type...>>>
+when_any(T&&... tasks)
 {
 	typedef std::tuple<typename std::decay<T>::type...> result_type;
 

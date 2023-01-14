@@ -56,6 +56,9 @@ void aligned_free(void* addr) LIBASYNC_NOEXCEPT
 // Wait for a task to complete (for threads outside thread pool)
 static void generic_wait_handler(task_wait_handle wait_task)
 {
+	// 简单的通知机制，线程等待一个task结束
+	// 在线程task中添加一个callback，当task运行完就会调用callback
+	// callback就发信号给等待线程
 	// Create an event to wait on
 	task_wait_event event;
 	event.init();

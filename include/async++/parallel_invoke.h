@@ -25,17 +25,19 @@
 namespace async {
 namespace detail {
 
+// 采用跟parallel_for类似的策略，divide and concur
 // Recursively split the arguments so tasks are spawned in parallel
 template<std::size_t Start, std::size_t Count>
 struct parallel_invoke_internal {
 	template<typename Sched, typename Tuple>
 	static void run(Sched& sched, const Tuple& args)
 	{
+		// 后一半丢到其它线程运行
 		auto&& t = async::local_spawn(sched, [&sched, &args] {
 			parallel_invoke_internal<Start + Count / 2, Count - Count / 2>::run(sched, args);
 		});
 		parallel_invoke_internal<Start, Count / 2>::run(sched, args);
-		t.get();
+		t.get();  // 同步后一半计算结果
 	}
 };
 template<std::size_t Index>
@@ -43,6 +45,8 @@ struct parallel_invoke_internal<Index, 1> {
 	template<typename Sched, typename Tuple>
 	static void run(Sched&, const Tuple& args)
 	{
+		// 在当前线程中直接运行函数
+		// 当前提交的线程是会承担运行一个函数的责任的
 		// Make sure to preserve the rvalue/lvalue-ness of the original parameter
 		std::forward<typename std::tuple_element<Index, Tuple>::type>(std::get<Index>(args))();
 	}
@@ -57,7 +61,8 @@ struct parallel_invoke_internal<Index, 0> {
 
 // Run several functions in parallel, optionally using the specified scheduler.
 template<typename Sched, typename... Args>
-typename std::enable_if<detail::is_scheduler<Sched>::value>::type parallel_invoke(Sched& sched, Args&&... args)
+typename std::enable_if<detail::is_scheduler<Sched>::value>::type
+parallel_invoke(Sched& sched, Args&&... args)
 {
 	detail::parallel_invoke_internal<0, sizeof...(Args)>::run(sched, std::forward_as_tuple(std::forward<Args>(args)...));
 }
