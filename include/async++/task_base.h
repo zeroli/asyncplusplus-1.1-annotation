@@ -60,7 +60,13 @@ struct task_base_vtable {
 
 // Type-generic base task object
 struct task_base_deleter;
-struct LIBASYNC_CACHELINE_ALIGN task_base: public ref_count_base<task_base, task_base_deleter> {
+
+// 一个task也是cache line对齐的
+// 继承于ref count类，这样就可以支持add_ref/remove_ref
+// 从而支持以引用计数的方式被只能指针管理
+struct LIBASYNC_CACHELINE_ALIGN task_base:
+	public ref_count_base<task_base, task_base_deleter>
+{
 	// Task state
 	std::atomic<task_state> state;
 
@@ -70,9 +76,14 @@ struct LIBASYNC_CACHELINE_ALIGN task_base: public ref_count_base<task_base, task
 	// Vector of continuations
 	continuation_vector continuations;
 
+	// 没有定义任何virtual函数，自己提供虚函数表来实现所有操作都放在一个集合中
 	// Virtual function table used for dynamic dispatch
 	const task_base_vtable* vtable;
 
+	// 类自己的new/delete操作符，调用到这里
+	// 对齐到cache line
+	// 有点疑惑，类定义已经申明了cache line对齐了，为啥还要实现特别的new/delete
+	// 来分配对齐到cache line的内存呢？
 	// Use aligned memory allocation
 	static void* operator new(std::size_t size)
 	{

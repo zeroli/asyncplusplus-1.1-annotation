@@ -60,7 +60,8 @@ class basic_task {
 
 	// Common code for then()
 	template<typename Sched, typename Func, typename Parent>
-	typename continuation_traits<Parent, Func>::task_type then_internal(Sched& sched, Func&& f, Parent&& parent) const
+	typename continuation_traits<Parent, Func>::task_type
+	then_internal(Sched& sched, Func&& f, Parent&& parent) const
 	{
 		LIBASYNC_ASSERT(internal_task, std::invalid_argument, "Use of empty task object");
 
@@ -70,13 +71,22 @@ class basic_task {
 		// Create continuation
 		typedef continuation_traits<Parent, Func> traits;
 		typedef typename void_to_fake_void<typename traits::task_type::result_type>::type cont_internal_result;
-		typedef continuation_exec_func<Sched, typename std::decay<Parent>::type, cont_internal_result, typename traits::decay_func, typename traits::is_value_cont, is_task<typename traits::result_type>::value> exec_func;
+		typedef continuation_exec_func<Sched,
+			typename std::decay<Parent>::type,
+			cont_internal_result,
+			typename traits::decay_func,
+			typename traits::is_value_cont,
+			is_task<typename traits::result_type>::value> exec_func;
+
+		// 创建一个新的task，把当前的task作为父亲传进去
 		typename traits::task_type cont;
-		set_internal_task(cont, task_ptr(new task_func<Sched, exec_func, cont_internal_result>(std::forward<Func>(f), std::forward<Parent>(parent))));
+		set_internal_task(cont,
+			task_ptr(new task_func<Sched, exec_func, cont_internal_result>(std::forward<Func>(f), std::forward<Parent>(parent))));
 
 		// Add the continuation to this task
 		// Avoid an expensive ref-count modification since the task isn't shared yet
 		get_internal_task(cont)->add_ref_unlocked();
+		// `sched`存在于`task_result`类中，`task_func`继承于它， 在union中
 		get_internal_task(cont)->sched = std::addressof(sched);
 		my_internal->add_continuation(sched, task_ptr(get_internal_task(cont)));
 
@@ -232,6 +242,7 @@ public:
 
 } // namespace detail
 
+// 返回给用户的task类型
 template<typename Result>
 class task: public detail::basic_task<Result> {
 public:
@@ -258,12 +269,14 @@ public:
 
 	// Add a continuation to the task
 	template<typename Sched, typename Func>
-	typename detail::continuation_traits<task, Func>::task_type then(Sched& sched, Func&& f)
+	typename detail::continuation_traits<task, Func>::task_type
+	then(Sched& sched, Func&& f)
 	{
 		return this->then_internal(sched, std::forward<Func>(f), std::move(*this));
 	}
 	template<typename Func>
-	typename detail::continuation_traits<task, Func>::task_type then(Func&& f)
+	typename detail::continuation_traits<task, Func>::task_type
+	then(Func&& f)
 	{
 		return then(::async::default_scheduler(), std::forward<Func>(f));
 	}
