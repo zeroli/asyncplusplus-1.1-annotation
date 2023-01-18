@@ -58,6 +58,7 @@ class basic_task {
 		get_internal_task(*this)->wait_and_throw();
 	}
 
+	// 一个task调用它的then，返回一个新的task，可以继续调用then
 	// Common code for then()
 	template<typename Sched, typename Func, typename Parent>
 	typename continuation_traits<Parent, Func>::task_type
@@ -509,7 +510,26 @@ spawn(Sched& sched, Func&& f)
 		typename detail::remove_task<decltype(std::declval<decay_func>()())>::type>::type internal_result;
 	typedef detail::root_exec_func<Sched,
 		internal_result, decay_func,
+		// 正常传入进来的func返回结果应该不是一个task
+		// 所以这里就是false，因此需要wrap成一个task
+		// 如果返回是一个task，那么返回的task作为子task，将子task的结果作为父task的结果进行返回
+		// 父task返回之前子task必须完成，这两个task相互依赖，可运行不同的线程中
+		// 一个线程等待另一个线程的task结束
+		/*
+		async::spawn([] {
+			std::cout << "Outer task" << std::endl;
+			// Return a task<int>
+			return async::spawn([] {
+				std::cout << "Inner task" << std::endl;
+				return 42;
+			});
+		}).then([](int result) {
+			std::cout << "Continuation task" << std::endl;
+			std::cout << result << std::endl;
+		});
+		*/
 		detail::is_task<decltype(std::declval<decay_func>()())>::value> exec_func;
+	// 用户提供的函数，保存在`exec_func`对象里面，`exec_func`对象保存在`task_func`里面
 	// 这里构造一个task对象，一个handle
 	// `task_func`才是内部真正包装func的对象
 	task<typename detail::remove_task<decltype(std::declval<decay_func>()())>::type> out;

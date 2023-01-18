@@ -40,6 +40,8 @@ inline bool is_finished(task_state s)
 	return s == task_state::completed || s == task_state::canceled;
 }
 
+// handy的virtual function table声称可以产生的代码比较小
+// 所有的函数的第一个参数一定是task_base*指针类型，对应于virtual function的this指针
 // Virtual function table used to allow dynamic dispatch for task objects.
 // While this is very similar to what a compiler would generate with virtual
 // functions, this scheme was found to result in significantly smaller
@@ -322,6 +324,9 @@ const task_base_vtable task_result<Result>::vtable_impl = {
 	nullptr // schedule
 };
 
+// 这个类`func_base`的设计可以很好的学习下：
+// 如何实现partial specialization从而进行优化：SFINAE + std::enable_if
+// 如何针对大小为空的func进行优化
 // Class to hold a function object, with empty base class optimization
 template<typename Func, typename = void>
 struct func_base {
@@ -352,6 +357,12 @@ struct func_base<Func, typename std::enable_if<std::is_empty<Func>::value>::type
 	}
 };
 
+// 一个func holder类，内部开启一段内存区间
+// 内存里面保存的对象，直到运行时特定时候才进行构造
+// 这个类的设计可以学习下，开启内存空间采用aligned_storage
+// 运行时手动构造，采用placement new
+// 运行时手动析构，采用显示调用析构函数
+// 同时这个类模板也支持局部特化来对空的数据类型进行优化
 // Class to hold a function object and initialize/destroy it at any time
 template<typename Func, typename = void>
 struct func_holder {
@@ -388,6 +399,11 @@ struct func_holder<Func, typename std::enable_if<std::is_empty<Func>::value>::ty
 	}
 };
 
+// 这个task_func类继承于两个类
+// 一个父类负责保存函数结果，一个父类保存函数本身
+// 保存函数结果的类，继承于最上层的task_base基类，提供task的一些属性和接口
+// 虽然是继承，但是并没有采用传统的虚函数的方式
+// 自己手写virtual function table，针对类本身的，故用stack const静态数据成员
 // Task object with an associated function object
 // Using private inheritance so empty Func doesn't take up space
 template<typename Sched, typename Func, typename Result>
@@ -406,6 +422,8 @@ struct task_func: public task_result<Result>, func_holder<Func> {
 	{
 		LIBASYNC_TRY {
 			// Dispatch to execution function
+			// get_func()一般返回一个对root_exec_func的引用
+			// 因为task_func保存的就是一个root_exec_func对象
 			static_cast<task_func<Sched, Func, Result>*>(t)->get_func()(t);
 		} LIBASYNC_CATCH(...) {
 			cancel(t, std::current_exception());
@@ -500,6 +518,10 @@ void unwrapped_finish(task_base* parent_base, Child child_task)
 	// Set up a continuation on the child to set the result of the parent
 	LIBASYNC_TRY {
 		parent_base->add_ref();
+		// `unwrapped_func`是一个函数对象，这里提供函数对象给then调用可以认为是一个task
+		// 可是什么把child_task调用起来的呢？
+		// 在执行父task最后返回child_task时，child_task就被放入到scheduler的队列中了
+		// 同一个线程schedule task，将会在local queue中，取出并调用
 		child_task.then(inline_scheduler(), unwrapped_func<Result, Child>(task_ptr(parent_base)));
 	} LIBASYNC_CATCH(...) {
 		// Use cancel_base here because the function object is already destroyed.
@@ -514,10 +536,16 @@ struct root_exec_func: private func_base<Func> {
 	template<typename F>
 	explicit root_exec_func(F&& f)
 		: func_base<Func>(std::forward<F>(f)) {}
+
+	// !!!!!!!!! task func执行入口  !!!!!!!!!
 	void operator()(task_base* t)
 	{
+		// 触发调用，设置保存结果
+		// `get_func`返回就是用户提供的可调用函数对象
 		static_cast<task_result<Result>*>(t)->set_result(detail::invoke_fake_void(std::move(this->get_func())));
+		// 销毁函数
 		static_cast<task_func<Sched, root_exec_func, Result>*>(t)->destroy_func();
+		// 标记结束并schedule continuation task
 		t->finish();
 	}
 };
@@ -528,6 +556,9 @@ struct root_exec_func<Sched, Result, Func, true>: private func_base<Func> {
 		: func_base<Func>(std::forward<F>(f)) {}
 	void operator()(task_base* t)
 	{
+		// 注意这里的: `std::move(this->get_func())()`
+		// 这里函数进行了调用，是父task进行了调用，返回值作为第二个参数传入`unwrapped_finish`
+		// 第一个参数是父task，外围包裹task，需要等待子task完成返回后设置result给自己后才能返回
 		unwrapped_finish<Sched, Result, root_exec_func>(t, std::move(this->get_func())());
 	}
 };

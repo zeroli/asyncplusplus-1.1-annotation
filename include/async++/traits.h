@@ -95,9 +95,28 @@ struct is_callable;
 template<typename Func, typename... Args>
 struct is_callable<Func(Args...)>: public std::integral_constant<bool, sizeof(is_callable_helper<Func, Args...>(0)) - 1> {};
 
+// `invoke_fake_void`提供2类调用方式
+// 一个是无参数调用，一个是带参数调用
+// 两者都提供返回值，一种是void返回，一种具体的返回值
+// 返回值用一个模板类来包装两个不同的返回类型: void => fake_void, result => result
+// void用一个特别的空类来表示
+// 下面代码实现用到了SFINAE + std::enable_if技巧来支持函数重载
+// std::enable_if是描述在模板参数中
 // Wrapper to run a function object with an optional parameter:
 // - void returns are turned into fake_void
 // - fake_void parameter will invoke the function with no arguments
+
+// 这个写法有点啰嗦，为啥不直接将enable_if写在返回值中，譬如下面：
+/*
+	>>> 推导返回值不是void类型，直接返回那个类型
+	template <typename Func>
+	std::enable_if<!std::is_void<decltype(std::declval<Func>()())>::value, decltype(std::declval<Func>()())>
+	invoke_fake_void(Func&& f);
+	>>> 推导返回值是void类型，返回fake_void
+	template <typename Func>
+	std::enable_if<std::is_void<decltype(std::declval<Func>()())>::value, fake_void>
+	invoke_fake_void(Func&& f);
+*/
 template<typename Func, typename = typename std::enable_if<!std::is_void<decltype(std::declval<Func>()())>::value>::type>
 decltype(std::declval<Func>()()) invoke_fake_void(Func&& f)
 {
@@ -106,16 +125,20 @@ decltype(std::declval<Func>()()) invoke_fake_void(Func&& f)
 template<typename Func, typename = typename std::enable_if<std::is_void<decltype(std::declval<Func>()())>::value>::type>
 fake_void invoke_fake_void(Func&& f)
 {
+	// !!!!!!用户可调用对象被调用的地方!!!!!!!
 	std::forward<Func>(f)();
 	return fake_void();
 }
+// 带参数的参数调用，将函数和参数捕获到lambda表达式中，从而转调用无参数的函数版本
 template<typename Func, typename Param>
-typename void_to_fake_void<decltype(std::declval<Func>()(std::declval<Param>()))>::type invoke_fake_void(Func&& f, Param&& p)
+typename void_to_fake_void<decltype(std::declval<Func>()(std::declval<Param>()))>::type
+invoke_fake_void(Func&& f, Param&& p)
 {
 	return detail::invoke_fake_void([&f, &p] {return std::forward<Func>(f)(std::forward<Param>(p));});
 }
 template<typename Func>
-typename void_to_fake_void<decltype(std::declval<Func>()())>::type invoke_fake_void(Func&& f, fake_void)
+typename void_to_fake_void<decltype(std::declval<Func>()())>::type
+invoke_fake_void(Func&& f, fake_void)
 {
 	return detail::invoke_fake_void(std::forward<Func>(f));
 }
